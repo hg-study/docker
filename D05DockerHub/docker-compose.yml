@@ -1,0 +1,90 @@
+version: '3.8'
+
+# 컨테이너 간 통신용 커스텀 네트워크(고정 IP 대역 지정)
+networks:
+  custom-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet : 172.30.0.0/24
+          gateway : 172.30.0.1
+
+services:
+  # MySQL DB 컨테이너
+  db:
+    image: parkhangyeol/docker_app_test:db
+    container_name: db-container
+    networks:
+      custom-network:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5          
+    ports:
+      - "3330:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: YOUR_DB_PASSWORD
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testroot
+      MYSQL_PASSWORD: YOUR_DB_PASSWORD
+      MYSQL_ROOT_HOST: '%' 
+    volumes:
+      # - ./DB/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - db-data:/var/lib/mysql           
+  
+  # Redis 캐시 컨테이너
+  redis:
+    image: parkhangyeol/docker_app_test:redis
+    container_name: redis-container
+    ports:
+      - "6380:6379"
+    networks:
+      custom-network:
+        ipv4_address: 172.30.0.20
+
+  # React(FN) 프론트엔드 컨테이너
+  fn:
+    image: parkhangyeol/docker_app_test:fn
+    container_name: fn-container
+    ports:
+      - "3000:80"
+    depends_on:
+      bn:
+        condition: service_healthy
+    networks:
+      custom-network:
+        ipv4_address: 172.30.0.30 
+
+  # Spring Boot(BN) 백엔드 컨테이너
+  bn:
+    image: parkhangyeol/docker_app_test:bn
+    container_name: bn-container
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db-container:3306/testdb
+      SPRING_DATASOURCE_USERNAME: testroot
+      SPRING_DATASOURCE_PASSWORD: YOUR_DB_PASSWORD
+      SPRING_REDIS_HOST: redis
+      SERVER_PORT: 8080
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f  http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    networks:
+      custom-network:
+        ipv4_address: 172.30.0.40  
+
+
+# DB 데이터 영속화용 볼륨
+volumes:
+  db-data:
